@@ -14,6 +14,7 @@ is lost before the user decides what they're comfortable exporting.
 from __future__ import annotations
 
 import json
+import os
 import platform
 import sys
 from dataclasses import asdict
@@ -22,9 +23,12 @@ from pathlib import Path
 from typing import Any
 
 from robo_rec import __version__ as app_version
+from robo_rec.diagnostics.findings import build_findings
 from robo_rec.diagnostics.self_test import SelfTestResult, run_self_test
 from robo_rec.gpu.report import GpuStatusReport, probe_gpu_status
 from robo_rec.recovery.history import RunRecord, recent_runs
+from robo_rec.util.build_info import get_build_info
+from robo_rec.util.memory import system_memory
 from robo_rec.util.paths import is_compiled
 
 _REDACTED = "[REDACTED]"
@@ -94,6 +98,19 @@ def _scrub(text: str, secrets: list[str]) -> str:
     return text
 
 
+def _timestamped_log(lines: list[str], offsets: list[float]) -> list[dict[str, Any]]:
+    """Each engine line with the seconds since launch at which it arrived (None for records
+    that predate offsets), so silences are visible rather than inferred from total duration."""
+    return [
+        {"t": offsets[i] if i < len(offsets) else None, "line": line}
+        for i, line in enumerate(lines)
+    ]
+
+
+def _gb(num_bytes: int) -> float:
+    return round(num_bytes / 2**30, 3)
+
+
 def _run_record_to_dict(run: RunRecord, *, include_sensitive: bool) -> dict[str, Any]:
     base = {
         "timestamp": run.timestamp.isoformat(),
@@ -107,14 +124,19 @@ def _run_record_to_dict(run: RunRecord, *, include_sensitive: bool) -> dict[str,
         "cancelled": run.cancelled,
         "matched_path": run.matched_path,
         "launch_error": run.launch_error,
+        "outcome": run.outcome,
+        "peak_memory_gb": _gb(run.peak_memory_bytes) if run.peak_memory_bytes else None,
+        # (seconds since launch, GB) of the whole seedrecover process tree's commit charge
+        "memory_samples_gb": [[t, _gb(b)] for t, b in run.memory_samples],
     }
     if include_sensitive:
         return {
             **base,
+            "error": run.error,
             "argv": run.argv,
             "recovered_mnemonic": run.recovered_mnemonic,
             "matched_address": run.matched_address,
-            "log_lines": run.log_lines,
+            "log": _timestamped_log(run.log_lines, run.log_offsets),
         }
 
     secrets = [
@@ -127,7 +149,8 @@ def _run_record_to_dict(run: RunRecord, *, include_sensitive: bool) -> dict[str,
         "argv": _redact_argv(run.argv),
         "recovered_mnemonic": _REDACTED if run.recovered_mnemonic else None,
         "matched_address": _REDACTED if run.matched_address else None,
-        "log_lines": [_scrub(line, secrets) for line in run.log_lines],
+        "error": _scrub(run.error, secrets) if run.error else None,
+        "log": _timestamped_log([_scrub(line, secrets) for line in run.log_lines], run.log_offsets),
     }
 
 
@@ -155,13 +178,20 @@ def _self_test_to_dict(result: SelfTestResult, *, include_sensitive: bool) -> di
     }
 
 
-def _app_info() -> dict[str, Any]:
+def _app_info(memory: dict[str, int] | None) -> dict[str, Any]:
     return {
         "app_version": app_version,
         "running_compiled_build": is_compiled(),
+        "build": get_build_info(),
         "python_version": sys.version,
         "platform": platform.platform(),
         "processor": platform.processor(),
+        "logical_cores": os.cpu_count(),
+        # Machine totals as of this export. commit_limit (RAM + page file) is the ceiling that
+        # an out-of-memory crash actually hits on Windows; available_* are current, not at run time.
+        "memory_gb": {k.removesuffix("_bytes"): _gb(v) for k, v in memory.items()}
+        if memory
+        else None,
     }
 
 
@@ -179,17 +209,21 @@ def build_diagnostics_report(*, use_gpu_for_self_test: bool, include_sensitive: 
     speed."""
     gpu_report = probe_gpu_status()
     self_test_results = run_self_test(use_gpu=use_gpu_for_self_test, keep_sensitive=include_sensitive)
+    memory = system_memory()
+    runs = recent_runs()
 
     return {
         "generated_at": datetime.now(UTC).isoformat(),
         "include_sensitive": include_sensitive,
-        "app": _app_info(),
+        # Read this first: one-line conclusions per abnormal run, errors before warnings.
+        "findings": build_findings(runs, self_test_results, memory),
+        "app": _app_info(memory),
         "gpu": _gpu_report_to_dict(gpu_report),
         "self_test": [
             _self_test_to_dict(r, include_sensitive=include_sensitive) for r in self_test_results
         ],
         "recent_recovery_runs": [
-            _run_record_to_dict(r, include_sensitive=include_sensitive) for r in recent_runs()
+            _run_record_to_dict(r, include_sensitive=include_sensitive) for r in runs
         ],
     }
 

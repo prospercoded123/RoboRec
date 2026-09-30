@@ -17,6 +17,9 @@ if ($Clean -and (Test-Path "dist")) {
     Remove-Item -Recurse -Force dist
 }
 
+# Stamp the build's source commit into the app so a Diagnostics export can say what built it.
+& .venv\Scripts\python.exe scripts\write_build_info.py
+
 # Nuitka's own cache (downloaded MinGW64 toolchain included) defaults to
 # appdirs.user_cache_dir("Nuitka"), which under a Microsoft Store Python install resolves
 # into that package's virtualized, deeply-nested AppData folder (something like

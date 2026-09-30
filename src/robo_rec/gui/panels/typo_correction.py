@@ -31,9 +31,11 @@ from robo_rec.gui.coin_options import (
 from robo_rec.gui.icons import load_pixmap
 from robo_rec.gui.panels.base_panel import BasePanel
 from robo_rec.gui.recovery_worker import RecoveryWorker
+from robo_rec.gui.result_text import failure_text
 from robo_rec.gui.theme import ACCENT
 from robo_rec.gui.widgets.animated_stack import AnimatedStackedWidget
 from robo_rec.gui.widgets.copy_button import CopyButton
+from robo_rec.gui.widgets.run_clock import RunClock
 from robo_rec.gui.widgets.search_progress import SearchProgressWidget
 from robo_rec.gui.widgets.seed_row import SeedRow
 from robo_rec.recovery.exceptions import InvalidSpecError
@@ -136,6 +138,9 @@ class TypoCorrectionPanel(BasePanel):
         self._result_subtitle.setObjectName("DashboardSubtitle")
         self._result_subtitle.setWordWrap(True)
         layout.addWidget(self._result_subtitle)
+
+        self._result_clock = RunClock()
+        layout.addWidget(self._result_clock)
 
         seed_header = QHBoxLayout()
         seed_label = QLabel("SEED PHRASE")
@@ -268,6 +273,7 @@ class TypoCorrectionPanel(BasePanel):
             self._cleanup_worker()
 
     def _show_result(self, result) -> None:
+        self._result_clock.show_span_of(self._progress.clock)
         if result.succeeded and result.mnemonic:
             self._result_icon.setPixmap(load_pixmap("party-popper", ACCENT, 22))
             self._result_title.setText("Found the corrected phrase")
@@ -281,11 +287,16 @@ class TypoCorrectionPanel(BasePanel):
             self._copy_button.setVisible(True)
         else:
             self._result_icon.setPixmap(load_pixmap("loader-circle", ACCENT, 22))
-            self._result_title.setText("No corrected phrase found")
-            self._result_subtitle.setText(
-                "Robo-Rec searched nearby spellings and word substitutions and none "
-                "matched the test address. Double-check the address and your phrase."
+            title, subtitle = failure_text(
+                result,
+                not_found_title="No corrected phrase found",
+                not_found_subtitle=(
+                    "Robo-Rec searched nearby spellings and word substitutions and none "
+                    "matched the test address. Double-check the address and your phrase."
+                ),
             )
+            self._result_title.setText(title)
+            self._result_subtitle.setText(subtitle)
             self._result_row.set_length(len(self._seed_row.tiles()))
             self._result_row.set_words(self._seed_row.words())
             self._copy_button.setVisible(False)

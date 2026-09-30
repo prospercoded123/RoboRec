@@ -34,6 +34,7 @@ from robo_rec.recovery.models import (
     TypoCorrectionSpec,
 )
 from robo_rec.recovery.parser import parse_line
+from robo_rec.util.memory import MemorySampler
 from robo_rec.util.paths import btcrecover_root, seedrecover_command
 from robo_rec.util.process import stream_lines
 
@@ -51,6 +52,34 @@ def _build_argv_and_tokenlist(
     if isinstance(spec, TypoCorrectionSpec):
         return build_typo_correction_args(spec, use_gpu=use_gpu), None
     raise TypeError(f"Unrecognized RecoverySpec variant: {type(spec).__name__}")
+
+
+_OUT_OF_MEMORY_HINT = (
+    "The search ran out of memory before it could start. Try again with fewer missing words "
+    "or close other programs, and send the diagnostics export if it keeps happening."
+)
+
+
+def _describe_failure(return_code: int, error_lines: list[str], log_lines: list[str]) -> str:
+    """User-facing explanation for a run that did not end in "found" or a genuine, completed
+    "Seed not found" — i.e. the engine crashed, was refused, or exited without a verdict.
+
+    seedrecover exits 0 for a search that ran to exhaustion and 1 for any error it reports
+    itself (btcrpass.error_exit); anything else (e.g. 3 from Nuitka's segfault handler) means the
+    process died underneath it. The engine's own message is included verbatim so nothing is lost.
+    """
+    detail = " ".join(error_lines[:3]).strip()
+    if not detail:
+        tail = [line.strip() for line in log_lines if line.strip()][-3:]
+        detail = " ".join(tail)
+    lowered = detail.lower()
+    if "segmentation fault" in lowered or "out of memory" in lowered:
+        message = _OUT_OF_MEMORY_HINT
+    elif return_code == 0:
+        message = "The search engine stopped without reporting a result."
+    else:
+        message = f"The search engine stopped unexpectedly (exit code {return_code})."
+    return f"{message}\n\nEngine output: {detail}" if detail else message
 
 
 class BtcrecoverRunner:
@@ -115,6 +144,8 @@ class BtcrecoverRunner:
                 matched_path=None,
                 log_lines=[],
                 launch_error=str(exc),
+                outcome="error",
+                error=f"Failed to launch seedrecover: {exc}",
             )
             raise LaunchError(f"Failed to launch seedrecover: {exc}") from exc
 
@@ -124,18 +155,31 @@ class BtcrecoverRunner:
         # assignment happened after this yield, an early cancel() would be a silent no-op
         # and the subprocess would run to completion unattended.
         self._process = process
+        # Memory is sampled for the whole process tree (seedrecover spawns one worker process per
+        # thread) so the diagnostics can show whether a crash coincided with memory exhaustion.
+        memory_sampler = MemorySampler()
+        memory_sampler.start(process.pid)
+        output_started = time.monotonic()
 
         yield RecoveryEvent(kind="started", message="Starting recovery search...")
         found_result: RecoveryResult | None = None
         mnemonic: str | None = None
         matched_path: str | None = None
         log_lines: list[str] = []
+        log_offsets: list[float] = []
+        error_lines: list[str] = []
+        saw_not_found = False
 
         try:
             for line in lines:
                 event = parse_line(line)
                 if event.raw_line is not None:
                     log_lines.append(event.raw_line)
+                    log_offsets.append(round(time.monotonic() - output_started, 1))
+                if event.kind == "error":
+                    error_lines.append(event.message)
+                elif event.kind == "not_found":
+                    saw_not_found = True
                 if event.kind == "found" and event.result is not None:
                     if event.result.mnemonic is not None:
                         mnemonic = event.result.mnemonic
@@ -145,16 +189,35 @@ class BtcrecoverRunner:
 
             return_code = process.wait()
         finally:
+            memory_sampler.stop()
             self._cleanup_tokenlist()
 
         succeeded = mnemonic is not None
+        cancelled = self._stop_event.is_set() and not succeeded
+        # A genuine "not found" is ONLY a clean exit (0) that also printed "Seed not found".
+        # Everything else that isn't a hit or a user cancel is a failure and must be reported
+        # as one — otherwise a crash/out-of-memory looks identical to an exhausted search.
+        completed_without_hit = return_code == 0 and saw_not_found and not error_lines
+        error = None
+        if not succeeded and not cancelled and not completed_without_hit:
+            error = _describe_failure(return_code, error_lines, log_lines)
         found_result = RecoveryResult(
             mnemonic=mnemonic,
             matched_address=self._first_target_address(),
             matched_path=matched_path,
             return_code=return_code,
             succeeded=succeeded,
+            error=error,
+            cancelled=cancelled,
         )
+        if succeeded:
+            outcome = "found"
+        elif cancelled:
+            outcome = "cancelled"
+        elif error:
+            outcome = "error"
+        else:
+            outcome = "not_found"
         self._record_run(
             argv=argv,
             start_time=start_time,
@@ -164,10 +227,23 @@ class BtcrecoverRunner:
             matched_path=matched_path,
             log_lines=log_lines,
             launch_error=None,
+            outcome=outcome,
+            error=error,
+            log_offsets=log_offsets,
+            peak_memory_bytes=memory_sampler.peak_bytes,
+            memory_samples=memory_sampler.samples,
         )
         yield RecoveryEvent(
             kind="finished",
-            message="Recovery finished." if succeeded else "Recovery finished: not found.",
+            message=(
+                "Recovery finished."
+                if succeeded
+                else "Recovery cancelled."
+                if cancelled
+                else "Recovery failed."
+                if error
+                else "Recovery finished: not found."
+            ),
             result=found_result,
         )
 
@@ -182,6 +258,11 @@ class BtcrecoverRunner:
         matched_path: str | None,
         log_lines: list[str],
         launch_error: str | None,
+        outcome: str = "unknown",
+        error: str | None = None,
+        log_offsets: list[float] | None = None,
+        peak_memory_bytes: int | None = None,
+        memory_samples: list[tuple[float, int]] | None = None,
     ) -> None:
         """Feeds robo_rec.diagnostics.report via robo_rec.recovery.history — see that
         module's docstring for why this stores everything unredacted (redaction happens at
@@ -203,6 +284,11 @@ class BtcrecoverRunner:
                 matched_path=matched_path,
                 log_lines=cap_log_lines(log_lines),
                 launch_error=launch_error,
+                outcome=outcome,
+                error=error,
+                log_offsets=cap_log_lines(log_offsets or []),
+                peak_memory_bytes=peak_memory_bytes,
+                memory_samples=list(memory_samples or []),
             )
         )
 

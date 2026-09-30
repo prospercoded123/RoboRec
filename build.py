@@ -14,6 +14,9 @@ def build():
     if dist.exists():
         shutil.rmtree(dist)
 
+    # Stamp the build's source commit into the app so a Diagnostics export can say what built it.
+    subprocess.run([sys.executable, str(repo_root / "scripts" / "write_build_info.py")], check=False)
+
     # Run Nuitka compilation with minimal but complete flags
     cmd = [
         sys.executable,

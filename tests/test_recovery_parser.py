@@ -61,3 +61,28 @@ def test_unrecognized_line_becomes_log_event():
     event = parse_line("Using the 'en' wordlist.")
     assert event.kind == "log"
     assert event.message == "Using the 'en' wordlist."
+
+
+def test_error_exit_line_is_an_error_event():
+    event = parse_line("Error: out of memory")
+    assert event.kind == "error"
+    assert event.message == "Error: out of memory"
+
+
+def test_max_eta_refusal_is_an_error_event():
+    line = "Error: at least 1,234 passwords to try, ETA > --max-eta option (168 hours), exiting"
+    assert parse_line(line).kind == "error"
+
+
+def test_nuitka_segfault_line_is_an_error_event():
+    line = "Nuitka: A segmentation fault has occurred. This is highly unusual and can"
+    assert parse_line(line).kind == "error"
+
+
+def test_python_traceback_is_an_error_event():
+    assert parse_line("Traceback (most recent call last):").kind == "error"
+
+
+def test_benign_warning_lines_are_not_errors():
+    assert parse_line("'%%' was in your seed, but there is no similar seed word.").kind == "log"
+    assert parse_line("Notice: the --no-dupchecks option will reduce memory usage").kind == "log"

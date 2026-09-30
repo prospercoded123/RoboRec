@@ -466,6 +466,44 @@ QPushButton#PrimaryButton:disabled {{
     color: {ACCENT};
 }}
 
+/* ---- Run clock ---- */
+#RunClock {{
+    background-color: {SURFACE};
+    border: 1px solid {BORDER};
+    border-left: 3px solid {BORDER_STRONG};
+    border-radius: 8px;
+}}
+
+#RunClock[state="running"] {{
+    border-left: 3px solid {ACCENT};
+}}
+
+#RunClock[state="stopped"] {{
+    border-left: 3px solid {TEXT_MUTED};
+}}
+
+#RunClockCaption {{
+    font-size: 11px;
+    color: {TEXT_MUTED};
+}}
+
+#RunClockElapsed {{
+    font-family: {FONT_MONO};
+    font-size: 24px;
+    font-weight: 600;
+    color: {TEXT_PRIMARY};
+}}
+
+#RunClock[state="running"] #RunClockElapsed {{
+    color: {ACCENT};
+}}
+
+#RunClockStamp {{
+    font-family: {FONT_MONO};
+    font-size: 14px;
+    color: {TEXT_SECONDARY};
+}}
+
 /* ---- Notices ---- */
 #WarningNotice {{
     background-color: {WARNING_DIM};

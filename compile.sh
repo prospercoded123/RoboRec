@@ -10,6 +10,9 @@ echo ""
 
 rm -rf dist
 
+# Stamp the build's source commit into the app so a Diagnostics export can say what built it.
+.venv/bin/python scripts/write_build_info.py
+
 # Get number of CPU cores for parallel compilation
 NUM_CORES=$(nproc 2>/dev/null || echo 4)
 

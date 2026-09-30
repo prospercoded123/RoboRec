@@ -43,7 +43,18 @@ from robo_rec.util.mnemonic import close_words, is_valid_word
 # btcrecover only ever lowers this further itself (e.g. by VRAM budget on GPU), never raises it.
 _WORKER_THREADS = max(1, (os.cpu_count() or 1) - 1)
 
-_COMMON_FLAGS = ["--no-gui", "--dsw", "--threads", str(_WORKER_THREADS)]
+# --no-dupchecks (passed once) turns off btcrpass's password DuplicateChecker, which remembers
+# every candidate it has generated in a Python dict (~200 bytes each) for the whole first pass.
+# That's ~0.8 GB at 2 blanks but ~1.5 TB at 3 blanks (2048^3 candidates), and it runs during the
+# up-front counting pass, so a 3+ blank search dies before it starts — in the compiled build as a
+# raw Nuitka segfault, not a MemoryError btcrseed's handle_oom() could catch.
+#
+# seedrecover's own default phase ladder adds this flag itself at big_typos=2, but passing an
+# explicit --typos/--big-typos (which _typo_flags does, to reach 3-4 blanks) skips that ladder and
+# silently drops the flag with it. Blanks are filled from distinct wordlist entries, so there are
+# essentially no duplicates to catch; at worst a repeat is verified twice, never missed. A single
+# flag keeps the separate, much smaller token-combination dup check Rearrange still benefits from.
+_COMMON_FLAGS = ["--no-gui", "--dsw", "--no-dupchecks", "--threads", str(_WORKER_THREADS)]
 
 
 # Wallet classes that implement btcrseed.py's _return_verified_password_or_false_opencl

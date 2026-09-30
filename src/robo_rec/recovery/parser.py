@@ -27,6 +27,15 @@ _FOUND_RE = re.compile(r"\*\*\*MATCHING SEED FOUND\*\*\*, (.+)")
 _SEED_FOUND_RE = re.compile(r"Seed found: (.+)")
 _NOT_FOUND_RE = re.compile(r"\s*Seed not found")
 _MATCH_PATH_RE = re.compile(r"Matched on Address at derivation path: (\S+)")
+# Lines that mean the engine itself failed, as opposed to a search that completed without a hit:
+#   "Error: ..."          btcrpass.error_exit() / handle_oom() ("Error: out of memory",
+#                         "Error: at least N passwords to try, ETA > --max-eta ...")
+#   "Nuitka: A segmentation fault ..."  the compiled seedrecover.exe dying at C level (e.g. when
+#                         memory runs out before Python can raise MemoryError)
+#   "Traceback (most ..."  an unhandled Python exception
+_ERROR_RE = re.compile(
+    r"^(?:Error:|Nuitka: A segmentation fault|Traceback \(most recent call last\))"
+)
 
 
 def _eta_to_seconds(eta_text: str) -> int | None:
@@ -44,6 +53,9 @@ def parse_line(line: str) -> RecoveryEvent:
     kind='log' events so nothing is silently dropped — the GUI can choose to show or hide
     raw log lines independent of the higher-level phase/eta/found events."""
     stripped = line.strip()
+
+    if _ERROR_RE.match(stripped):
+        return RecoveryEvent(kind="error", message=stripped, raw_line=line)
 
     if match := _PHASE_RE.search(stripped):
         current, total, detail = match.groups()

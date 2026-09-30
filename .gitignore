@@ -32,6 +32,9 @@ Thumbs.db
 *.log
 gpu_report*.json
 
+# Generated at build time by scripts/write_build_info.py
+src/robo_rec/_build_info.py
+
 # Per-machine OpenCL correctness-test cache (robo_rec.gpu.correctness_cache) — this
 # is deliberately meant to travel with a copied app folder (e.g. on a flash drive),
 # never with the source checkout.
@@ -40,3 +43,6 @@ gpu_config.json
 # Test VM state (if ever referenced locally)
 *.vdi
 *.vbox
+
+docs
+issues

@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from robo_rec.gui.widgets.run_clock import RunClock
 from robo_rec.gui.widgets.seed_row import SeedRow
 
 _DOT_FRAMES = ("", ".", "..", "...")
@@ -54,6 +55,11 @@ class SearchProgressWidget(QWidget):
         self._progress_bar.setTextVisible(False)
         self._progress_bar.setFixedHeight(8)
         layout.addWidget(self._progress_bar)
+
+        # Sits directly under the progress bar and above the wrapping phase text, so its
+        # position never shifts as the phase message grows.
+        self.clock = RunClock()
+        layout.addWidget(self.clock)
 
         self._phase_label = QLabel()
         self._phase_label.setObjectName("InfoNotice")
@@ -103,9 +109,11 @@ class SearchProgressWidget(QWidget):
         self._summary_target_label.setText(target_summary)
 
         self._dot_timer.start()
+        self.clock.start()
 
     def stop(self) -> None:
         self._dot_timer.stop()
+        self.clock.stop()
 
     def set_subtitle(self, text: str) -> None:
         self._subtitle_label.setText(text)

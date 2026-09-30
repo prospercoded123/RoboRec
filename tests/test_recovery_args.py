@@ -194,3 +194,38 @@ def test_rearrangement_builds_tokenlist_and_argv():
             assert word in lines
     finally:
         tokenlist_path.unlink()
+
+
+def _all_builders_argv():
+    known = MissingWordKnownPositionSpec(
+        words=["abandon"] * 11 + [None], wallet_type="bip39", addrs=["x"]
+    )
+    unknown = MissingWordUnknownPositionSpec(
+        words=["abandon"] * 11, full_length=12, wallet_type="bip39", addrs=["x"]
+    )
+    typo = TypoCorrectionSpec(
+        best_guess_mnemonic="abandon " * 11 + "about", wallet_type="bip39", addrs=["x"]
+    )
+    rearr = RearrangementSpec(
+        known_words=["abandon"] * 10 + [None, None],
+        scrambled_words=["about", "zoo"],
+        wallet_type="bip39",
+        addrs=["x"],
+    )
+    rearr_argv, tokenlist = build_rearrangement_args(rearr)
+    tokenlist.unlink()
+    return [
+        build_missing_word_known_position_args(known),
+        build_missing_word_unknown_position_args(unknown),
+        build_typo_correction_args(typo),
+        rearr_argv,
+    ]
+
+
+def test_every_scenario_disables_the_duplicate_checker_exactly_once():
+    # Regression: explicit --typos/--big-typos skips seedrecover's own phase ladder, which is
+    # what normally adds --no-dupchecks; without it a 3-blank search builds a ~1.5 TB dict while
+    # counting candidates and the compiled exe segfaults. Once (not twice) keeps Rearrange's
+    # separate token-combination dup check, which needs < 2.
+    for argv in _all_builders_argv():
+        assert argv.count("--no-dupchecks") == 1

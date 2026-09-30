@@ -15,6 +15,9 @@ if exist dist (
     rmdir /s /q dist
 )
 
+REM Stamp the build's source commit into the app so a Diagnostics export can say what built it.
+call .venv\Scripts\python.exe scripts\write_build_info.py
+
 for /f %%A in ('powershell -Command "(Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors"') do set NUM_CORES=%%A
 echo Starting compilation on %NUM_CORES% cores...
 REM --mingw64 forces Nuitka to download/use its OWN managed toolchain instead of

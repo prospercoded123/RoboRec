@@ -42,6 +42,18 @@ class RunRecord:
     matched_path: str | None
     log_lines: list[str] = field(default_factory=list)
     launch_error: str | None = None
+    # What actually happened, decided by the runner: "found" | "not_found" | "cancelled" |
+    # "error". succeeded=False alone is ambiguous — a crash and a fully exhausted search both
+    # have it — which is exactly how a segfault got read as "no match" for a whole support cycle.
+    outcome: str = "unknown"
+    error: str | None = None
+    # Seconds since the process started, parallel to (and capped the same as) log_lines. Lets a
+    # reader see "silent for 23 minutes after this line" instead of inferring it from duration.
+    log_offsets: list[float] = field(default_factory=list)
+    # Commit charge of the whole seedrecover process tree (see robo_rec.util.memory). None when
+    # it couldn't be measured — never 0, so "unknown" and "tiny" stay distinguishable.
+    peak_memory_bytes: int | None = None
+    memory_samples: list[tuple[float, int]] = field(default_factory=list)
 
 
 def record(run: RunRecord) -> None:
@@ -61,9 +73,10 @@ def clear() -> None:
         _records.clear()
 
 
-def cap_log_lines(lines: list[str]) -> list[str]:
+def cap_log_lines(lines: list) -> list:
     """Keeps the most recent _MAX_LOG_LINES — early phase-transition lines matter less than
-    what was happening right before the process exited."""
+    what was happening right before the process exited. Also used for log_offsets so the two
+    lists stay index-aligned after capping."""
     return lines[-_MAX_LOG_LINES:]
 
 

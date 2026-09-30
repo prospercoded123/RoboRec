@@ -38,10 +38,12 @@ from robo_rec.gui.icons import load_pixmap
 from robo_rec.gui.panels.base_panel import BasePanel
 from robo_rec.gui.log_filter import extract_log_from_event
 from robo_rec.gui.recovery_worker import RecoveryWorker
+from robo_rec.gui.result_text import failure_text
 from robo_rec.gui.terminal_sidebar import TerminalSidebar
 from robo_rec.gui.theme import ACCENT
 from robo_rec.gui.widgets.animated_stack import AnimatedStackedWidget
 from robo_rec.gui.widgets.copy_button import CopyButton
+from robo_rec.gui.widgets.run_clock import RunClock
 from robo_rec.gui.widgets.search_progress import SearchProgressWidget
 from robo_rec.gui.widgets.seed_row import SeedRow
 from robo_rec.recovery.exceptions import InvalidSpecError
@@ -197,6 +199,9 @@ class MissingWordsPanel(BasePanel):
         self._result_subtitle = QLabel()
         self._result_subtitle.setWordWrap(True)
         layout.addWidget(self._result_subtitle)
+
+        self._result_clock = RunClock()
+        layout.addWidget(self._result_clock)
 
         self._seed_card = QWidget()
         self._seed_card.setObjectName("SuccessSeedCard")
@@ -418,6 +423,7 @@ class MissingWordsPanel(BasePanel):
             self._cleanup_worker()
 
     def _show_result(self, result) -> None:
+        self._result_clock.show_span_of(self._progress.clock)
         if result.succeeded and result.mnemonic:
             self._result_icon.setPixmap(load_pixmap("party-popper", ACCENT, 32))
             self._result_title.setText("Recovered your seed phrase")
@@ -434,12 +440,17 @@ class MissingWordsPanel(BasePanel):
             self._copy_button.setVisible(True)
         else:
             self._result_icon.setPixmap(load_pixmap("loader-circle", ACCENT, 22))
-            self._result_title.setText("No matching phrase found")
-            self._result_title.setObjectName("DashboardTitle")
-            self._result_subtitle.setText(
-                "Robo-Rec searched every combination in this range and none matched the "
-                "test address. Double-check the address and the words you entered."
+            title, subtitle = failure_text(
+                result,
+                not_found_title="No matching phrase found",
+                not_found_subtitle=(
+                    "Robo-Rec searched every combination in this range and none matched the "
+                    "test address. Double-check the address and the words you entered."
+                ),
             )
+            self._result_title.setText(title)
+            self._result_title.setObjectName("DashboardTitle")
+            self._result_subtitle.setText(subtitle)
             self._result_subtitle.setObjectName("DashboardSubtitle")
             self._seed_card.setObjectName("")
             self._result_row.set_length(len(self._seed_row.tiles()))

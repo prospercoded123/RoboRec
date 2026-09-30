@@ -33,6 +33,7 @@ from robo_rec.gui.gpu_worker import GpuProbeWorker
 from robo_rec.gui.icons import load_pixmap
 from robo_rec.gui.panels.base_panel import BasePanel
 from robo_rec.gui.theme import ACCENT, TEXT_SECONDARY
+from robo_rec.gui.widgets.run_clock import RunClock
 
 
 class GpuStatusPanel(BasePanel):
@@ -102,6 +103,10 @@ class GpuStatusPanel(BasePanel):
         diagnostics_hint.setWordWrap(True)
         diagnostics_hint.setObjectName("PanelDescription")
         diagnostics_layout.addWidget(diagnostics_hint)
+
+        self._diagnostics_clock = RunClock()
+        self._diagnostics_clock.hide()
+        diagnostics_layout.addWidget(self._diagnostics_clock)
 
         self._include_sensitive_checkbox = QCheckBox(
             "Include sensitive data (addresses, seed words, recovered phrases) unredacted"
@@ -281,6 +286,8 @@ class GpuStatusPanel(BasePanel):
             "This takes a few minutes; the app will stay responsive."
         )
         self._diagnostics_status_label.show()
+        self._diagnostics_clock.show()
+        self._diagnostics_clock.start()
 
         self._diagnostics_worker = DiagnosticsWorker(
             use_gpu_for_self_test=is_gpu_available(),
@@ -295,6 +302,7 @@ class GpuStatusPanel(BasePanel):
         self._refresh_button.setEnabled(True)
         self._include_sensitive_checkbox.setEnabled(True)
         self._diagnostics_status_label.hide()
+        self._diagnostics_clock.stop()  # stays visible, frozen, showing the last run
         if self._diagnostics_worker is not None:
             self._diagnostics_worker.wait_and_cleanup()
             self._diagnostics_worker = None

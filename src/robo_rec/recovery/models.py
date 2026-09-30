@@ -139,6 +139,11 @@ class RecoveryResult:
     matched_path: str | None
     return_code: int
     succeeded: bool
+    # Set when the engine did NOT finish normally (crash, out-of-memory, bad arguments, ...).
+    # A search that genuinely ran to exhaustion and found nothing has error=None — callers must
+    # never present an error as "no match found".
+    error: str | None = None
+    cancelled: bool = False
 
 
 @dataclass(frozen=True)
