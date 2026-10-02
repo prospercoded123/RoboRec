@@ -37,6 +37,7 @@ $nuitkaArgs = @(
     "-m"
     "nuitka"
     "--assume-yes-for-downloads"
+
     # --mingw64 forces Nuitka to download and use its OWN managed MinGW64 toolchain
     # instead of auto-detecting whatever gcc is already on this machine (e.g. a
     # system-installed TDM-GCC-64). Left DISABLED (commented out) by default because that
@@ -112,6 +113,7 @@ try {
         "-m"
         "nuitka"
         "--assume-yes-for-downloads"
+
         # See the main build stage's comment above (same flag, same reasoning) — disabled
         # by default, only uncomment if a plain build fails with a
         # "windows.h: No such file or directory" / compiler-arch-mismatch error.
