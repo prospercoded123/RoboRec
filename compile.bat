@@ -28,6 +28,7 @@ REM plain build fails with a compiler-arch-mismatch warning followed by "windows
 REM such file or directory" -- see compile.ps1's comment for the full explanation.
 call .venv\Scripts\python.exe -m nuitka ^
   --assume-yes-for-downloads ^
+  --mingw64 ^
   --standalone ^
   --follow-imports ^
   --enable-plugin=pyside6 ^
@@ -79,6 +80,7 @@ pushd "%REPO_ROOT%vendor\btcrecover"
 REM See the main build stage's comment above re: --mingw64 -- not passed here either.
 call "%REPO_ROOT%.venv\Scripts\python.exe" -m nuitka ^
   --assume-yes-for-downloads ^
+  --mingw64 ^
   --standalone ^
   --follow-imports ^
   --include-package=btcrecover ^

@@ -8,6 +8,30 @@ $ErrorActionPreference = "Stop"
 $REPO_ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $REPO_ROOT
 
+# Nuitka silently falls back to the Zig compiler when it finds no usable MSVC/MinGW
+# ("No usable C compiler, attempt fallback to zig" in its verbose log). Zig's `cc` defaults
+# to the BUILD machine's own CPU (it defined __AVX2__ and __AVX512F__ on an i5-1135G7), so
+# the resulting .exe crashes with an illegal-instruction error on any PC whose CPU lacks
+# those instructions. MSVC and MinGW emit baseline x86-64 code, which runs everywhere.
+# Nuitka writes scons-report.txt (naming the compiler it chose) before the long C compile,
+# so this check reads it afterward and refuses to hand out a non-portable build.
+# Set ROBOREC_ALLOW_ZIG=1 to override for a local-only test build.
+function Assert-PortableCompiler([string]$ReportPath, [string]$Stage) {
+    if ($env:ROBOREC_ALLOW_ZIG -eq "1") { return }
+    if (-not (Test-Path $ReportPath)) {
+        Write-Host "Could not find $ReportPath to verify the $Stage compiler; build may not be portable." -ForegroundColor Yellow
+        return
+    }
+    if (Select-String -Path $ReportPath -Pattern 'zig\.exe' -Quiet) {
+        Write-Host ""
+        Write-Host "The $Stage stage was compiled with Zig, which targets THIS machine's CPU." -ForegroundColor Red
+        Write-Host "The result can crash on other PCs (illegal instruction). Install a real compiler and rebuild:" -ForegroundColor Red
+        Write-Host "  - Visual Studio Build Tools with the 'Desktop development with C++' workload (preferred), or" -ForegroundColor Red
+        Write-Host "  - uncomment ""--mingw64"" in this script to use Nuitka's own MinGW64 download." -ForegroundColor Red
+        exit 1
+    }
+}
+
 Write-Host "Building RoboRec with Nuitka..." -ForegroundColor Green
 Write-Host "This will take 10-20 minutes on first build" -ForegroundColor Yellow
 Write-Host ""
@@ -15,6 +39,16 @@ Write-Host ""
 if ($Clean -and (Test-Path "dist")) {
     Write-Host "Cleaning old build..." -ForegroundColor Gray
     Remove-Item -Recurse -Force dist
+}
+
+# --mingw64 (below) is rejected outright by Nuitka on Python 3.13+: "MinGW64 is not currently
+# supported with Python 3.13". Fail now with the fix instead of 20 minutes of setup first.
+$pyVersion = & .venv\Scripts\python.exe -c "import sys; print('%d.%d' % sys.version_info[:2])"
+if ([version]$pyVersion -ge [version]"3.13") {
+    Write-Host "This venv is Python $pyVersion, which Nuitka's --mingw64 does not support." -ForegroundColor Red
+    Write-Host "Recreate it on Python 3.11 or 3.12 (e.g. 'uv venv --python 3.12' then 'uv sync')," -ForegroundColor Red
+    Write-Host "or install Visual Studio Build Tools and remove --mingw64 from this script." -ForegroundColor Red
+    exit 1
 }
 
 # Stamp the build's source commit into the app so a Diagnostics export can say what built it.
@@ -56,7 +90,8 @@ $nuitkaArgs = @(
     # 64-bit test program fine standalone) — Nuitka's safety check rejects it anyway, and
     # partway into the real build ends up reaching for it regardless, causing the above
     # error. --mingw64 sidesteps that by using a toolchain Nuitka trusts outright.
-    # "--mingw64"
+    "--mingw64"
+    "--include-windows-runtime-dlls=yes"
     "--standalone"
     "--follow-imports"
     "--enable-plugin=pyside6"
@@ -95,6 +130,7 @@ if (-not $exe) {
     exit 1
 }
 $appFolder = $exe.Directory.FullName
+Assert-PortableCompiler (Join-Path $REPO_ROOT "dist\main.build\scons-report.txt") "Roborec.exe"
 
 # --- Stage 2: compile vendor/btcrecover/seedrecover.py into its own executable. ---
 # Roborec.exe never runs recovery itself — it shells out to seedrecover.exe (see
@@ -117,7 +153,8 @@ try {
         # See the main build stage's comment above (same flag, same reasoning) — disabled
         # by default, only uncomment if a plain build fails with a
         # "windows.h: No such file or directory" / compiler-arch-mismatch error.
-        # "--mingw64"
+        "--mingw64"
+        "--include-windows-runtime-dlls=yes"
         "--standalone"
         "--follow-imports"
         "--include-package=btcrecover"
@@ -170,8 +207,10 @@ if (-not $seedrecoverExe) {
     exit 1
 }
 
+Assert-PortableCompiler (Join-Path $seedrecoverBuildDir "seedrecover.build\scons-report.txt") "seedrecover.exe"
+
 Write-Host "Merging seedrecover.exe and its dependencies into the app folder..." -ForegroundColor Cyan
-Copy-Item -Path (Join-Path $seedrecoverExe.Directory.FullName "*") -Destination $appFolder -Recurse -Force
+robocopy $seedrecoverExe.Directory.FullName $appFolder /E /IS /IT | Out-Null
 
 $mergedSeedrecover = Join-Path $appFolder "seedrecover.exe"
 if (-not (Test-Path $mergedSeedrecover)) {

@@ -1,9 +1,24 @@
 #!/usr/bin/env python3
 """Build robo-rec into a standalone folder using Nuitka."""
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+
+def _assert_portable_compiler(report: Path, stage: str) -> None:
+    """Refuse a build compiled by Zig: Nuitka silently falls back to it when it finds no
+    usable MSVC/MinGW, and Zig's `cc` targets the BUILD machine's CPU (AVX2/AVX-512 on a
+    modern laptop), so the .exe can crash with an illegal instruction on other PCs. MSVC and
+    MinGW emit baseline x86-64. Set ROBOREC_ALLOW_ZIG=1 to override for a local-only build."""
+    if os.environ.get("ROBOREC_ALLOW_ZIG") == "1" or not report.is_file():
+        return
+    if "zig.exe" in report.read_text(errors="ignore").lower():
+        print(f"\n✗ The {stage} stage was compiled with Zig, which targets THIS machine's CPU.")
+        print("  The result can crash on other PCs. Install Visual Studio Build Tools")
+        print("  ('Desktop development with C++') or enable --mingw64, then rebuild.")
+        sys.exit(1)
 
 
 def build():
@@ -13,6 +28,13 @@ def build():
     # Clean previous builds
     if dist.exists():
         shutil.rmtree(dist)
+
+    # --mingw64 (below) is rejected by Nuitka on Python 3.13+, so fail now with the fix.
+    if sys.version_info >= (3, 13):
+        print(f"✗ Python {sys.version_info.major}.{sys.version_info.minor} is not supported with --mingw64.")
+        print("  Recreate the venv on Python 3.11/3.12, or install Visual Studio Build Tools")
+        print("  and remove --mingw64 from build.py.")
+        sys.exit(1)
 
     # Stamp the build's source commit into the app so a Diagnostics export can say what built it.
     subprocess.run([sys.executable, str(repo_root / "scripts" / "write_build_info.py")], check=False)
@@ -29,7 +51,8 @@ def build():
         # Add "--mingw64" back ONLY if a plain build fails with a compiler-arch-mismatch
         # warning followed by "windows.h: No such file or directory" — see compile.ps1's
         # comment for the full explanation of that failure mode.
-        # "--mingw64",
+        "--mingw64",
+        "--include-windows-runtime-dlls=yes",
         "--standalone",
         "--follow-imports",
         "--enable-plugin=pyside6",
@@ -63,6 +86,7 @@ def build():
         sys.exit(1)
 
     app_folder = matches[0].parent
+    _assert_portable_compiler(dist / "main.build" / "scons-report.txt", "Roborec.exe")
     seedrecover_exit = _build_seedrecover(repo_root)
     if seedrecover_exit != 0:
         print(f"\n✗ seedrecover.exe build failed with exit code {seedrecover_exit}")
@@ -74,6 +98,8 @@ def build():
     if not seedrecover_matches:
         print(f"\n✗ seedrecover build completed but seedrecover.exe not found under {seedrecover_dist}")
         sys.exit(1)
+
+    _assert_portable_compiler(seedrecover_dist / "seedrecover.build" / "scons-report.txt", "seedrecover.exe")
 
     print("Merging seedrecover.exe and its dependencies into the app folder...")
     shutil.copytree(seedrecover_matches[0].parent, app_folder, dirs_exist_ok=True)
@@ -112,7 +138,8 @@ def _build_seedrecover(repo_root: Path) -> int:
         "nuitka",
         "--assume-yes-for-downloads",
         # See the main build stage's comment re: --mingw64 — not passed here either.
-        # "--mingw64",
+        "--mingw64",
+        "--include-windows-runtime-dlls=yes",
         "--standalone",
         "--follow-imports",
         "--include-package=btcrecover",
